@@ -1,53 +1,66 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+// constants/Colors.ts
 
-import { Platform } from 'react-native';
+export const SSIL = {
+  // Official SSIL Orange from your logo & invoice
+  orange: '#ff6b00',
+  orangeDark: '#e65100',
+  red: '#d32f2f',        // Used for "Net Amount" in your real invoice
+  redDark: '#b71c1c',
+  gray: '#212121',
+  grayLight: '#666666',
+  grayLighter: '#999999',
+  background: '#fafafa',
+  surface: '#ffffff',
+  border: '#e0e0e0',
+  success: '#2e7d32',
+  warning: '#ff8f00',
+  error: '#d32f2f',
+};
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = SSIL.orange;
+const tintColorDark = '#ffffff';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
+    text: SSIL.gray,
+    background: SSIL.background,
+    surface: SSIL.surface,
     tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    primary: SSIL.orange,
+    primaryDark: SSIL.orangeDark,
+    accent: SSIL.red,
+    icon: SSIL.grayLight,
+    tabIconDefault: SSIL.grayLighter,
+    tabIconSelected: SSIL.orange,
+    border: SSIL.border,
+    success: SSIL.success,
+    warning: SSIL.warning,
+    error: SSIL.error,
+    card: '#ffffff',
+    notification: SSIL.orange,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: '#ffffff',
+    background: '#121212',
+    surface: '#1e1e1e',
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    primary: SSIL.orange,
+    primaryDark: SSIL.orangeDark,
+    accent: SSIL.red,
+    icon: '#cccccc',
+    tabIconDefault: '#888888',
+    tabIconSelected: SSIL.orange,
+    border: '#333333',
+    success: '#4caf50',
+    warning: '#ffb300',
+    error: '#ef5350',
+    card: '#1e1e1e',
+    notification: SSIL.orange,
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+// Optional: Export for easy use across app
+export const Theme = {
+  ...Colors.light,
+  ...SSIL,
+};

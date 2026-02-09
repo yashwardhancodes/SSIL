@@ -1,25 +1,24 @@
 {
   "expo": {
-    "name": "ssilFrontend2",
+    "name": "SSIL",
     "slug": "ssilFrontend2",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon1.png",
     "scheme": "ssilfrontend2",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
+    // ADD THIS LINE (THIS IS THE FIX!)
+    "assetBundlePatterns": ["**/*"],
+
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.yashvardhan_030.ssilFrontend2"
     },
     "web": {
       "output": "static",
@@ -43,6 +42,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d88232b5-90c6-434b-be22-1ed359a8717d"
+      }
     }
   }
 }
