@@ -6,10 +6,12 @@ import { Platform } from "react-native";
 import { useTheme } from "@/app/theme/ThemeContext";
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabLayout() {
   const { theme, isDark } = useTheme();
-const SSIL_ORANGE = "#ff6b00"; // your brand color
+  const insets = useSafeAreaInsets();
+  const SSIL_ORANGE = "#ff6b00"; // your brand color
 
   return (
     <Tabs
@@ -17,8 +19,8 @@ const SSIL_ORANGE = "#ff6b00"; // your brand color
         headerShown: false,
 
         // Colors from global theme
-          tabBarActiveTintColor: SSIL_ORANGE,     // ACTIVE icon + label = ORANGE
-    tabBarInactiveTintColor: theme.textSecondary,  // INACTIVE icon + label
+        tabBarActiveTintColor: SSIL_ORANGE,     // ACTIVE icon + label = ORANGE
+        tabBarInactiveTintColor: theme.textSecondary,  // INACTIVE icon + label
 
         // Label styles
         tabBarShowLabel: true,
@@ -33,8 +35,8 @@ const SSIL_ORANGE = "#ff6b00"; // your brand color
           backgroundColor: theme.card,
           borderTopWidth: 1,
           borderTopColor: theme.border,
-          height: Platform.OS === "ios" ? 84 : 70,
-          paddingBottom: Platform.OS === "ios" ? 28 : 10,
+          height: Platform.OS === "ios" ? 84 : 70 + insets.bottom,
+          paddingBottom: Platform.OS === "ios" ? 28 : 10 + insets.bottom,
           paddingTop: 8,
 
           // Shadow

@@ -9,7 +9,6 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
 
-    // ADD THIS LINE (THIS IS THE FIX!)
     "assetBundlePatterns": ["**/*"],
 
     "ios": {
@@ -45,9 +44,7 @@
     },
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "d88232b5-90c6-434b-be22-1ed359a8717d"
-      }
+      "eas": {}
     }
   }
 }

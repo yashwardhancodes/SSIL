@@ -1,16 +1,19 @@
 import { useTheme } from "@/app/theme/ThemeContext";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { endOfDay, format, isWithinInterval, startOfDay } from "date-fns";
 import { File, Paths } from "expo-file-system"; // ← New API
 import * as Print from "expo-print";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { Parser as Json2CsvParser } from "json2csv";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
+  Modal,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -29,10 +32,17 @@ export default function PaymentList() {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
 
-  const [typeFilter, setTypeFilter] = React.useState<"ALL" | "IN" | "OUT">("ALL");
-  const [modeFilter, setModeFilter] = React.useState<"ALL" | "CASH" | "UPI" | "BANK" | "CHEQUE">("ALL");
+  const [typeFilter, setTypeFilter] = React.useState<"All" | "IN" | "OUT">("All");
+  const [modeFilter, setModeFilter] = React.useState<"All" | "CASH" | "UPI" | "BANK" | "CHEQUE">("All");
   const [sortFilter, setSortFilter] = React.useState<"LATEST" | "OLDEST" | "AMOUNT">("LATEST");
   const [refreshing, setRefreshing] = React.useState(false);
+
+  const [start, setStart] = useState(new Date());
+  const [end, setEnd] = useState(new Date());
+  const [pick1, setPick1] = useState(false);
+  const [pick2, setPick2] = useState(false);
+  const [company, setCompany] = useState(false);
+  const [companyId, setCompanyId] = useState<number | "All">("All");
 
   const { data: payments = [], isLoading } = useQuery({
     queryKey: ["payments"],
@@ -67,7 +77,7 @@ export default function PaymentList() {
     let list = [...payments];
     if (typeFilter === "IN") list = list.filter((p) => p.type === "in");
     if (typeFilter === "OUT") list = list.filter((p) => p.type === "out");
-    if (modeFilter !== "ALL") list = list.filter((p) => p.mode?.toUpperCase() === modeFilter);
+    if (modeFilter !== "All") list = list.filter((p) => p.mode?.toUpperCase() === modeFilter);
 
     if (sortFilter === "LATEST")
       list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
@@ -79,61 +89,129 @@ export default function PaymentList() {
     return list;
   }, [payments, typeFilter, modeFilter, sortFilter]);
 
-  // EXPORT CSV & SHARE IMMEDIATELY
-  
-
-const exportToCSV = async () => {
-  try {
-    const fields = ["Date", "Party", "Type", "Amount", "Mode", "Invoice", "Note"];
-    const data = filteredPayments.map((p) => ({
-      Date: format(new Date(p.date || p.createdAt), "dd-MM-yyyy"),
-      Party: getPartyName(p.partyId),
-      Type: p.type === "in" ? "Received" : "Paid",
-      Amount: formatCurrency(p.amount),
-      Mode: p.mode?.toUpperCase() || "-",
-      Invoice: p.invoice ? p.invoice.invoiceNumber : "-",
-      Note: p.note || "-",
-    }));
-
-    const parser = new Json2CsvParser({ fields });
-    const csv = parser.parse(data);
-
-    const filename = `Ledger_${format(new Date(), "dd-MMM-yyyy_HHmm")}.csv`;
-    
-    // NEW API: Create File in cache directory
-    const csvFile = new File(Paths.cache, filename);
-    
-    // Create file if it doesn't exist
-    await csvFile.create();
-    
-    // Write the CSV string (replaces writeAsStringAsync)
-    await csvFile.write(csv);
-
-    // Get the file URI for sharing
-    const fileUri = csvFile.uri;
-
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(fileUri, {
-        mimeType: "text/csv",
-        dialogTitle: "Share Ledger CSV",
-        UTI: "public.comma-separated-values-text",
+  const getExportData = (startId?: number | "All") => {
+    const targetId = startId !== undefined ? startId : companyId;
+    return filteredPayments.filter((p) => {
+      const pDate = new Date(p.date || p.createdAt);
+      const dateMatch = isWithinInterval(pDate, {
+        start: startOfDay(start),
+        end: endOfDay(end),
       });
+      const partyMatch = targetId === "All" || p.partyId === targetId;
+      return dateMatch && partyMatch;
+    });
+  };
+
+  const askExport = (id: number | "All") => {
+    Alert.alert("Export Ledger", "Choose format", [
+      { text: "PDF (Recommended)", onPress: () => exportToPDF(id) },
+      { text: "CSV (Excel)", onPress: () => exportToCSV(id) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  const dateStuff = (event: any, selectedDate?: Date, type?: 'start' | 'end') => {
+    if (type === 'start') {
+      if (Platform.OS === 'android') setPick1(false);
+      if (selectedDate) {
+        setStart(selectedDate);
+        if (Platform.OS === 'android') {
+          setTimeout(() => setPick2(true), 100);
+        } else {
+          setPick1(false);
+          setPick2(true);
+        }
+      } else {
+        if (Platform.OS === 'ios') setPick1(false);
+      }
     } else {
-      Alert.alert("Success", `CSV saved to cache:\n${fileUri}`);
+      if (Platform.OS === 'android') setPick2(false);
+      if (selectedDate) {
+        setEnd(selectedDate);
+        if (Platform.OS === 'android') {
+          setCompany(true);
+        } else {
+          setPick2(false);
+          setCompany(true);
+        }
+      } else {
+        if (Platform.OS === 'ios') setPick2(false);
+      }
     }
-  } catch (err: any) {
-    console.error("CSV Export Error:", err);
-    Alert.alert("Export Failed", err.message || "Unknown error occurred");
-  }
-};
+  };
+
+  const picked = (id: number | "All") => {
+    setCompanyId(id);
+    setCompany(false);
+    setTimeout(() => askExport(id), 300);
+  };
+
+  // EXPORT CSV & SHARE IMMEDIATELY
+
+  const exportToCSV = async (id: number | "All") => {
+    try {
+      const exportData = getExportData(id);
+      if (exportData.length === 0) {
+        Alert.alert("No Data", "No payments found in the selected range.");
+        return;
+      }
+
+      const fields = ["Date", "Party", "Type", "Amount", "Mode", "Invoice", "Note"];
+      const data = exportData.map((p) => ({
+        Date: format(new Date(p.date || p.createdAt), "dd-MM-yyyy"),
+        Party: getPartyName(p.partyId),
+        Type: p.type === "in" ? "Received" : "Paid",
+        Amount: formatCurrency(p.amount),
+        Mode: p.mode?.toUpperCase() || "-",
+        Invoice: p.invoice ? p.invoice.invoiceNumber : "-",
+        Note: p.note || "-",
+      }));
+
+      const parser = new Json2CsvParser({ fields });
+      const csv = parser.parse(data);
+
+      const exportPartyName = id === "All" ? "All" : getPartyName(id as number);
+      const filename = `Ledger_${exportPartyName.replace(/[^a-zA-Z0-9]/g, '_')}_${format(new Date(), "dd-MMM-yyyy_HHmm")}.csv`;
+
+
+      const csvFile = new File(Paths.cache, filename);
+
+
+      await csvFile.create();
+
+
+      await csvFile.write(csv);
+
+      const fileUri = csvFile.uri;
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/csv",
+          dialogTitle: "Share Ledger CSV",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Success", `CSV saved to cache:\n${fileUri}`);
+      }
+    } catch (err: any) {
+      console.error("CSV Export Error:", err);
+      Alert.alert("Export Failed", err.message || "Unknown error occurred");
+    }
+  };
 
   // EXPORT PDF & SHARE IMMEDIATELY
-  const exportToPDF = async () => {
+  const exportToPDF = async (id: number | "All") => {
     try {
-      const totalIn = payments.filter((p: any) => p.type === "in").reduce((a: number, b: any) => a + b.amount, 0);
-      const totalOut = payments.filter((p: any) => p.type === "out").reduce((a: number, b: any) => a + b.amount, 0);
+      const exportData = getExportData(id);
+      if (exportData.length === 0) {
+        Alert.alert("No Data", "No payments found in the selected range.");
+        return;
+      }
 
-      const rows = filteredPayments
+      const totalIn = exportData.filter((p: any) => p.type === "in").reduce((a: number, b: any) => a + b.amount, 0);
+      const totalOut = exportData.filter((p: any) => p.type === "out").reduce((a: number, b: any) => a + b.amount, 0);
+
+      const rows = exportData
         .map(
           (p) => `
         <tr>
@@ -170,8 +248,9 @@ const exportToCSV = async () => {
         <body>
           <div class="header">
             <h1>Ledger Report</h1>
+            <div class="meta" style="font-size: 16px; color: #333; font-weight: bold; margin-bottom: 4px;">${id === "All" ? "All Parties" : getPartyName(id as number)}</div>
             <div class="meta">Generated on ${format(new Date(), "dd MMMM yyyy 'at' hh:mm a")}</div>
-            <div class="meta">Filter: ${typeFilter === "ALL" ? "All" : typeFilter === "IN" ? "Received" : "Paid"} | Mode: ${modeFilter} | Sort: ${sortFilter === "LATEST" ? "Latest First" : sortFilter === "OLDEST" ? "Oldest First" : "By Amount"}</div>
+            <div class="meta">Filter: ${typeFilter === "All" ? "All" : typeFilter === "IN" ? "Received" : "Paid"} | Mode: ${modeFilter} | Sort: ${sortFilter === "LATEST" ? "Latest First" : sortFilter === "OLDEST" ? "Oldest First" : "By Amount"}</div>
           </div>
           <table>
             <thead><tr>
@@ -207,7 +286,7 @@ const exportToCSV = async () => {
     <TouchableOpacity
       style={[styles.swipeDelete, { backgroundColor: theme.danger || "#ff4444" }]}
       onPress={() =>
-        Alert.alert("Delete Payment", "This will reverse all balances. Continue?", [
+        Alert.alert("Delete Payment", "This will reverse All balances. Continue?", [
           { text: "Cancel" },
           { text: "Delete", style: "destructive", onPress: () => deleteMut.mutate(id) },
         ])
@@ -222,13 +301,13 @@ const exportToCSV = async () => {
   return (
     <View style={styles.container}>
       <View style={styles.filterBar}>
-        <TouchableOpacity style={styles.filterBtn} onPress={() => setTypeFilter(prev => prev === "ALL" ? "IN" : prev === "IN" ? "OUT" : "ALL")}>
-          <Text style={styles.filterText}>{typeFilter === "ALL" ? "All" : typeFilter === "IN" ? "Received" : "Paid"}</Text>
+        <TouchableOpacity style={styles.filterBtn} onPress={() => setTypeFilter(prev => prev === "All" ? "IN" : prev === "IN" ? "OUT" : "All")}>
+          <Text style={styles.filterText}>{typeFilter === "All" ? "All" : typeFilter === "IN" ? "Received" : "Paid"}</Text>
           <IconSymbol name="chevron.down" size={16} color={theme.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.filterBtn} onPress={() => setModeFilter(prev => prev === "ALL" ? "CASH" : prev === "CASH" ? "UPI" : prev === "UPI" ? "BANK" : prev === "BANK" ? "CHEQUE" : "ALL")}>
-          <Text style={styles.filterText}>{modeFilter === "ALL" ? "Mode" : modeFilter}</Text>
+        <TouchableOpacity style={styles.filterBtn} onPress={() => setModeFilter(prev => prev === "All" ? "CASH" : prev === "CASH" ? "UPI" : prev === "UPI" ? "BANK" : prev === "BANK" ? "CHEQUE" : "All")}>
+          <Text style={styles.filterText}>{modeFilter === "All" ? "Mode" : modeFilter}</Text>
           <IconSymbol name="chevron.down" size={16} color={theme.textSecondary} />
         </TouchableOpacity>
 
@@ -239,13 +318,7 @@ const exportToCSV = async () => {
 
         <TouchableOpacity
           style={[styles.filterBtn, { backgroundColor: (theme.accent || "#0066ff") + "20" }]}
-          onPress={() =>
-            Alert.alert("Export Ledger", "Choose format", [
-              { text: "PDF (Recommended)", onPress: exportToPDF },
-              { text: "CSV (Excel)", onPress: exportToCSV },
-              { text: "Cancel", style: "cancel" },
-            ])
-          }
+          onPress={() => setPick1(true)}
         >
           <IconSymbol name="arrow.down.circle.fill" size={18} color={theme.accent || "#0066ff"} />
           <Text style={[styles.filterText, { color: theme.accent || "#0066ff" }]}>Export</Text>
@@ -287,6 +360,99 @@ const exportToCSV = async () => {
           );
         }}
       />
+      <Modal
+        visible={Platform.OS === 'ios' && (pick1 || pick2)}
+        transparent={true}
+        animationType="fade"
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => { setPick1(false); setPick2(false); }}
+        >
+          <View style={styles.pickerContainer}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={styles.pickerTitle}>{pick1 ? "Select Start Date" : "Select End Date"}</Text>
+              <TouchableOpacity onPress={() => { setPick1(false); setPick2(false); }}>
+                <Text style={{ color: theme.accent || 'blue', fontWeight: 'bold' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            {pick1 && (
+              <DateTimePicker
+                value={start}
+                mode="date"
+                display="inline"
+                onChange={(e, d) => dateStuff(e, d, 'start')}
+                style={{ height: 300 }}
+              />
+            )}
+            {pick2 && (
+              <DateTimePicker
+                value={end}
+                mode="date"
+                display="inline"
+                onChange={(e, d) => dateStuff(e, d, 'end')}
+                style={{ height: 300 }}
+              />
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+
+      {Platform.OS === 'android' && pick1 && (
+        <DateTimePicker
+          value={start}
+          mode="date"
+          display="default"
+          onChange={(e, d) => dateStuff(e, d, 'start')}
+        />
+      )}
+      {Platform.OS === 'android' && pick2 && (
+        <DateTimePicker
+          value={end}
+          mode="date"
+          display="default"
+          onChange={(e, d) => dateStuff(e, d, 'end')}
+        />
+      )}
+
+      {/* slect company*/}
+      <Modal
+        visible={company}
+        transparent={true}
+        animationType="fade"
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setCompany(false)}
+        >
+          <View style={[styles.pickerContainer, { maxHeight: '80%' }]}>
+            <Text style={styles.pickerTitle}>Select Party for Export</Text>
+
+            <FlatList
+              data={[{ id: "All", name: "All Parties" }, ...parties]}
+              keyExtractor={(item) => (item.id === "All" ? "All" : item.id.toString())}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.border || '#ff0000ff' }}
+                  onPress={() => picked(item.id as number | "All")}
+                >
+                  <Text style={{ fontSize: 16, color: theme.text, fontWeight: companyId === item.id ? 'bold' : 'normal' }}>
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+
+            <TouchableOpacity onPress={() => setCompany(false)} style={{ marginTop: 16, alignSelf: 'center', padding: 10 }}>
+              <Text style={{ color: theme.danger || 'red', fontWeight: 'bold' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -312,4 +478,7 @@ const createStyles = (theme: any) => StyleSheet.create({
   swipeDelete: { justifyContent: "center", alignItems: "center", width: 80, borderRadius: 12, marginVertical: 8, marginRight: 16 },
   swipeDeleteText: { color: "#fff", fontWeight: "700" },
   empty: { padding: 40, textAlign: "center", color: theme.textSecondary || "#888", fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  pickerContainer: { backgroundColor: 'white', padding: 20, borderRadius: 12, width: '90%' },
+  pickerTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#333' },
 });
