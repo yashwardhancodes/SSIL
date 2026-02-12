@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import Swipeable from "react-native-gesture-handler/Swipeable";
+import { InvoiceService } from "../services/invoiceService";
 import { PartyService } from "../services/partyService";
 import { PaymentService } from "../services/paymentService";
 
@@ -47,6 +48,11 @@ export default function PaymentList() {
   const { data: payments = [], isLoading } = useQuery({
     queryKey: ["payments"],
     queryFn: () => PaymentService.getAll().then((r) => r.data),
+  });
+
+  const { data: invoices = [] } = useQuery({
+    queryKey: ["invoices"],
+    queryFn: () => InvoiceService.getAll().then((r: any) => r.data),
   });
 
   const { data: parties = [] } = useQuery({
@@ -89,17 +95,63 @@ export default function PaymentList() {
     return list;
   }, [payments, typeFilter, modeFilter, sortFilter]);
 
-  const getExportData = (startId?: number | "All") => {
+  const getLedgerData = (startId?: number | "All") => {
     const targetId = startId !== undefined ? startId : companyId;
-    return filteredPayments.filter((p) => {
+
+    interface LedgerItem {
+      date: Date;
+      particulars: string;
+      debit: number;
+      credit: number;
+      type: "PAYMENT" | "INVOICE";
+    }
+
+    const ledger: LedgerItem[] = [];
+
+    //Payments
+    const relevantPayments = payments.filter((p: any) => {
       const pDate = new Date(p.date || p.createdAt);
-      const dateMatch = isWithinInterval(pDate, {
-        start: startOfDay(start),
-        end: endOfDay(end),
-      });
+      const inRange = isWithinInterval(pDate, { start: startOfDay(start), end: endOfDay(end) });
       const partyMatch = targetId === "All" || p.partyId === targetId;
-      return dateMatch && partyMatch;
+      return inRange && partyMatch;
     });
+
+    relevantPayments.forEach((p: any) => {
+      const isReceived = p.type === "in";
+      ledger.push({
+        date: new Date(p.date || p.createdAt),
+        particulars: `${isReceived ? "By" : "To"} ${p.mode?.toUpperCase()} - ${p.note || "Payment"}`,
+        debit: !isReceived ? p.amount : 0,
+        credit: isReceived ? p.amount : 0,
+        type: "PAYMENT",
+      });
+    });
+
+    //  Invoices
+    const relevantInvoices = invoices.filter((inv: any) => {
+      const iDate = new Date(inv.date || inv.createdAt);
+      const inRange = isWithinInterval(iDate, { start: startOfDay(start), end: endOfDay(end) });
+
+      const invPartyId = inv.partyId || inv.party?.id;
+      const partyMatch = targetId === "All" || invPartyId === targetId;
+      return inRange && partyMatch;
+    });
+
+    relevantInvoices.forEach((inv: any) => {
+      const isSale = (inv.type || "sale").toLowerCase() === "sale";
+      ledger.push({
+        date: new Date(inv.date || inv.createdAt),
+        particulars: `${isSale ? "To" : "By"} Invoice No - ${inv.invoiceNumber}`,
+        debit: isSale ? (inv.grandTotal || 0) : 0,
+        credit: !isSale ? (inv.grandTotal || 0) : 0,
+        type: "INVOICE",
+      });
+    });
+
+    // Sort by Date
+    ledger.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    return ledger;
   };
 
   const askExport = (id: number | "All") => {
@@ -150,27 +202,50 @@ export default function PaymentList() {
 
   const exportToCSV = async (id: number | "All") => {
     try {
-      const exportData = getExportData(id);
-      if (exportData.length === 0) {
-        Alert.alert("No Data", "No payments found in the selected range.");
+      const ledgerData = getLedgerData(id);
+      if (ledgerData.length === 0) {
+        Alert.alert("No Data", "No transactions found in the selected range.");
         return;
       }
 
-      const fields = ["Date", "Party", "Type", "Amount", "Mode", "Invoice", "Note"];
-      const data = exportData.map((p) => ({
-        Date: format(new Date(p.date || p.createdAt), "dd-MM-yyyy"),
-        Party: getPartyName(p.partyId),
-        Type: p.type === "in" ? "Received" : "Paid",
-        Amount: formatCurrency(p.amount),
-        Mode: p.mode?.toUpperCase() || "-",
-        Invoice: p.invoice ? p.invoice.invoiceNumber : "-",
-        Note: p.note || "-",
+      const fields = ["S.No", "Date", "Particulars", "Debit", "Credit"];
+      const data = ledgerData.map((item, index) => ({
+        "S.No": (index + 1).toString(),
+        Date: format(item.date, "dd/MM/yyyy"),
+        Particulars: item.particulars,
+        Debit: item.debit > 0 ? item.debit.toFixed(2) : "",
+        Credit: item.credit > 0 ? item.credit.toFixed(2) : "",
       }));
 
-      const parser = new Json2CsvParser({ fields });
-      const csv = parser.parse(data);
+      // Add Total Row
+      const totalDebit = ledgerData.reduce((sum, item) => sum + item.debit, 0);
+      const totalCredit = ledgerData.reduce((sum, item) => sum + item.credit, 0);
+      const balance = totalDebit - totalCredit;
 
-      const exportPartyName = id === "All" ? "All" : getPartyName(id as number);
+      data.push({
+        "S.No": "",
+        Date: "",
+        Particulars: "Total",
+        Debit: totalDebit.toFixed(2),
+        Credit: totalCredit.toFixed(2),
+      });
+
+      data.push({
+        "S.No": "",
+        Date: "",
+        Particulars: "Balance",
+        Debit: balance > 0 ? balance.toFixed(2) : "",
+        Credit: balance < 0 ? Math.abs(balance).toFixed(2) : "",
+      });
+
+      const parser = new Json2CsvParser({ fields });
+      const csvData = parser.parse(data);
+
+      const exportPartyName = id === "All" ? "All Parties" : getPartyName(id as number);
+      // Prepend Headers to match the image
+      const headerString = `,,Name: ${exportPartyName}\n,,Period : ${format(start, "dd/MM/yyyy")} to ${format(end, "dd/MM/yyyy")}\n\n`;
+      const finalCsv = headerString + csvData;
+
       const filename = `Ledger_${exportPartyName.replace(/[^a-zA-Z0-9]/g, '_')}_${format(new Date(), "dd-MMM-yyyy_HHmm")}.csv`;
 
 
@@ -180,7 +255,7 @@ export default function PaymentList() {
       await csvFile.create();
 
 
-      await csvFile.write(csv);
+      await csvFile.write(finalCsv);
 
       const fileUri = csvFile.uri;
 
@@ -202,27 +277,25 @@ export default function PaymentList() {
   // EXPORT PDF & SHARE IMMEDIATELY
   const exportToPDF = async (id: number | "All") => {
     try {
-      const exportData = getExportData(id);
-      if (exportData.length === 0) {
-        Alert.alert("No Data", "No payments found in the selected range.");
+      const ledgerData = getLedgerData(id);
+      if (ledgerData.length === 0) {
+        Alert.alert("No Data", "No transactions found in the selected range.");
         return;
       }
 
-      const totalIn = exportData.filter((p: any) => p.type === "in").reduce((a: number, b: any) => a + b.amount, 0);
-      const totalOut = exportData.filter((p: any) => p.type === "out").reduce((a: number, b: any) => a + b.amount, 0);
+      const totalDebit = ledgerData.reduce((sum, item) => sum + item.debit, 0);
+      const totalCredit = ledgerData.reduce((sum, item) => sum + item.credit, 0);
+      const balance = totalDebit - totalCredit;
 
-      const rows = exportData
+      const rows = ledgerData
         .map(
-          (p) => `
+          (item, index) => `
         <tr>
-          <td style="padding: 12px 8px; text-align: left;">${format(new Date(p.date || p.createdAt), "dd MMM yyyy")}</td>
-          <td style="padding: 12px 8px;">${getPartyName(p.partyId)}</td>
-          <td style="padding: 12px 8px; text-align: center;">${p.type === "in" ? "RECEIVED" : "PAID"}</td>
-          <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: ${p.type === "in" ? "#00aa00" : "#aa0000"};">
-            ${p.type === "in" ? "+" : "-"} ${formatCurrency(p.amount)}
-          </td>
-          <td style="padding: 12px 8px; text-align: center;">${p.mode?.toUpperCase() || "-"}</td>
-          <td style="padding: 12px 8px; text-align: center;">${p.invoice ? p.invoice.invoiceNumber : "-"}</td>
+          <td style="padding: 12px 8px; text-align: center;">${index + 1}</td>
+          <td style="padding: 12px 8px;">${format(item.date, "dd-MMM-yyyy")}</td>
+          <td style="padding: 12px 8px;">${item.particulars}</td>
+          <td style="padding: 12px 8px; text-align: right; color: #aa0000;">${item.debit > 0 ? formatCurrency(item.debit) : ""}</td>
+          <td style="padding: 12px 8px; text-align: right; color: #00aa00;">${item.credit > 0 ? formatCurrency(item.credit) : ""}</td>
         </tr>`
         )
         .join("");
@@ -235,33 +308,46 @@ export default function PaymentList() {
             body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; color: #333; margin: 0; }
             .header { text-align: center; margin-bottom: 30px; }
             h1 { margin: 0; color: #1a1a1a; font-size: 24px; }
-            .meta { color: #666; font-size: 14px; margin: 8px 0; }
+            .meta { color: #666; font-size: 14px; margin: 4px 0; }
             table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
             th { background: ${theme.accent || "#0066ff"}; color: white; padding: 16px 8px; text-align: left; }
             td { border-bottom: 1px solid #eee; }
             .footer { margin-top: 40px; text-align: right; font-size: 18px; }
-            .total-in { color: #00aa00; font-weight: bold; }
-            .total-out { color: #aa0000; font-weight: bold; }
+            .total-debit { color: #aa0000; font-weight: bold; }
+            .total-credit { color: #00aa00; font-weight: bold; }
             .net { font-size: 22px; margin-top: 10px; color: #333; font-weight: bold; }
           </style>
         </head>
         <body>
           <div class="header">
             <h1>Ledger Report</h1>
-            <div class="meta" style="font-size: 16px; color: #333; font-weight: bold; margin-bottom: 4px;">${id === "All" ? "All Parties" : getPartyName(id as number)}</div>
+            <div class="meta" style="font-size: 18px; color: #333; font-weight: bold; margin-bottom: 8px;">${id === "All" ? "All Parties" : getPartyName(id as number)}</div>
+             <div class="meta">Period: ${format(start, "dd MMM yyyy")} to ${format(end, "dd MMM yyyy")}</div>
             <div class="meta">Generated on ${format(new Date(), "dd MMMM yyyy 'at' hh:mm a")}</div>
-            <div class="meta">Filter: ${typeFilter === "All" ? "All" : typeFilter === "IN" ? "Received" : "Paid"} | Mode: ${modeFilter} | Sort: ${sortFilter === "LATEST" ? "Latest First" : sortFilter === "OLDEST" ? "Oldest First" : "By Amount"}</div>
           </div>
           <table>
             <thead><tr>
-              <th>Date</th><th>Party</th><th>Type</th><th>Amount</th><th>Mode</th><th>Invoice</th>
+              <th style="width: 50px;">S.No</th>
+              <th style="width: 120px;">Date</th>
+              <th>Particulars</th>
+              <th style="text-align: right;">Debit</th>
+              <th style="text-align: right;">Credit</th>
             </tr></thead>
-            <tbody>${rows || "<tr><td colspan='6' style='text-align:center; padding:60px; color:#999;'>No payments found</td></tr>"}</tbody>
+            <tbody>
+              ${rows}
+             <tr style="background-color: #f9f9f9; font-weight: bold;">
+                <td colspan="3" style="padding: 12px 8px; text-align: right;">Total</td>
+                <td style="padding: 12px 8px; text-align: right; color: #aa0000;">${formatCurrency(totalDebit)}</td>
+                <td style="padding: 12px 8px; text-align: right; color: #00aa00;">${formatCurrency(totalCredit)}</td>
+             </tr>
+            </tbody>
           </table>
           <div class="footer">
-            <div>Total Received: <span class="total-in">+ ${formatCurrency(totalIn)}</span></div>
-            <div>Total Paid: <span class="total-out">- ${formatCurrency(totalOut)}</span></div>
-            <div class="net">Net Balance: <strong>${formatCurrency(totalIn - totalOut)}</strong></div>
+            <div>Total Debit: <span class="total-debit">${formatCurrency(totalDebit)}</span></div>
+            <div>Total Credit: <span class="total-credit">${formatCurrency(totalCredit)}</span></div>
+            <div class="net">
+              Closing Balance: <strong>${formatCurrency(Math.abs(balance))} ${balance >= 0 ? "(Receivable)" : "(Payable)"}</strong>
+            </div>
           </div>
         </body>
       </html>`;
