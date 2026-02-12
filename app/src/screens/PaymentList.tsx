@@ -242,7 +242,6 @@ export default function PaymentList() {
       const csvData = parser.parse(data);
 
       const exportPartyName = id === "All" ? "All Parties" : getPartyName(id as number);
-      // Prepend Headers to match the image
       const headerString = `,,Name: ${exportPartyName}\n,,Period : ${format(start, "dd/MM/yyyy")} to ${format(end, "dd/MM/yyyy")}\n\n`;
       const finalCsv = headerString + csvData;
 
